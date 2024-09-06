@@ -54,6 +54,7 @@ public class XChangeTask extends SourceTask {
   }
 
   public XChangeTask() {
+    // TODO inject exchange for unit testing
   }
 
   public XChangeTask(BinanceExchange exchange) {
