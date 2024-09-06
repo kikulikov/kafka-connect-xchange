@@ -15,7 +15,7 @@ export CLASSPATH="$(find target -type f -name '*.jar' | grep '\-with-dependencie
 export CLASSPATH="$(find target -type f -name '*.jar' | grep -v 'tests' | tr '\n' ':')"
 export CONFLUENT_HOME="/PATH"
 
-${CONFLUENT_HOME}/bin/connect-standalone config/standalone-worker.properties config/standalone-connector.properties
+${CONFLUENT_HOME}/bin/connect-standalone config/standalone-worker.properties config/standalone-binance-connector.properties
 
 kafka-topics --bootstrap-server=localhost:9092 --list
 kafka-topics --bootstrap-server=localhost:9092 --create --topic=prices --replication-factor=1 --partitions=2

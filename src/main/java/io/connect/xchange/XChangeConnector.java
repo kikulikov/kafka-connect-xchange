@@ -52,6 +52,7 @@ public class XChangeConnector extends SourceConnector {
   public List<Map<String, String>> taskConfigs(int maxTasks) {
     final List<Map<String, String>> configs = new ArrayList<>();
 
+    // TODO implement tasks properly to share the workload
     // for (int i = 0; i < maxTasks; i++) {
     final Map<String, String> taskConfig = this.config.values().entrySet().stream()
         .filter(s -> s.getValue() != null)
