@@ -32,7 +32,7 @@ public class XChangeTask extends SourceTask {
 
   private static final Schema TICKER_SCHEMA = SchemaBuilder.struct().version(1)
       .field("symbol", Schema.STRING_SCHEMA)
-      .field("exchange", Schema.STRING_SCHEMA)
+      .field("market", Schema.STRING_SCHEMA)
       .field("last", Schema.FLOAT64_SCHEMA)
       // .field("open", Schema.FLOAT64_SCHEMA)
       // .field("high", Schema.FLOAT64_SCHEMA)
@@ -44,8 +44,8 @@ public class XChangeTask extends SourceTask {
 
   private String kafkaTopic;
   private long pollIntervalMs;
-  private Set<String> marketDataSymbols;
-  private String marketDataExchange;
+  private Set<String> dataSymbols;
+  private String dataMarket;
   private Exchange exchange;
 
   @Override
@@ -66,15 +66,15 @@ public class XChangeTask extends SourceTask {
     final var config = new XChangeConfig(props);
     this.kafkaTopic = config.getString(XChangeConfig.KAFKA_TOPIC_CONF);
     this.pollIntervalMs = config.getLong(XChangeConfig.POLL_INTERVAL_MS_CONF);
-    this.marketDataSymbols = Arrays.stream(splitSymbols(config))
+    this.dataSymbols = Arrays.stream(splitSymbols(config))
         .filter(s -> !s.isEmpty()).collect(Collectors.toUnmodifiableSet());
-    this.marketDataExchange = config.getString(XChangeConfig.MARKET_DATA_EXCHANGE_CONF);
+    this.dataMarket = config.getString(XChangeConfig.DATA_MARKET_CONF);
 
-    if (BINANCE_EXCHANGE.equalsIgnoreCase(this.marketDataExchange)) {
+    if (BINANCE_EXCHANGE.equalsIgnoreCase(this.dataMarket)) {
       this.exchange = ExchangeFactory.INSTANCE.createExchange(BinanceExchange.class);
     }
 
-    if (BYBIT_EXCHANGE.equalsIgnoreCase(this.marketDataExchange)) {
+    if (BYBIT_EXCHANGE.equalsIgnoreCase(this.dataMarket)) {
       this.exchange = ExchangeFactory.INSTANCE.createExchange(BybitExchange.class);
     }
 
@@ -86,7 +86,7 @@ public class XChangeTask extends SourceTask {
   }
 
   private static String[] splitSymbols(XChangeConfig config) {
-    return config.getString(XChangeConfig.MARKET_DATA_SYMBOLS_CONF).split(",");
+    return config.getString(XChangeConfig.DATA_SYMBOLS_CONF).split(",");
   }
 
   @Override
@@ -104,8 +104,8 @@ public class XChangeTask extends SourceTask {
 
     final List<SourceRecord> records = new ArrayList<>();
 
-    for (String symbol : marketDataSymbols) {
-      final var ticker = tickerMarketData(symbol);
+    for (String symbol : dataSymbols) {
+      final var ticker = marketTicker(symbol);
       records.add(buildSourceRecord(ticker));
       records.add(buildSourceRecord(inverseTicker(ticker)));
     }
@@ -140,7 +140,7 @@ public class XChangeTask extends SourceTask {
     final var pair = currencyPairName(ticker.getInstrument());
     return new Struct(TICKER_SCHEMA)
         .put("symbol", pair)
-        .put("exchange", this.marketDataExchange)
+        .put("market", this.dataMarket)
         .put("last", ticker.getLast().doubleValue())
         // .put("open", ticker.getOpen())
         // .put("high", ticker.getHigh())
@@ -154,7 +154,7 @@ public class XChangeTask extends SourceTask {
     return instrument.getBase().getSymbol() + "-" + instrument.getCounter();
   }
 
-  private Ticker tickerMarketData(String symbol) {
+  private Ticker marketTicker(String symbol) {
     try {
       final Instrument instrument = new CurrencyPair(symbol);
       return exchange.getMarketDataService().getTicker(instrument);
