@@ -8,14 +8,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import static io.connect.xchange.XChangeConfig.MARKET_INSTRUMENTS_CONF;
 
 public class XChangeConnector extends SourceConnector {
 
   private static final Logger log = LoggerFactory.getLogger(XChangeConnector.class);
   private static final String CONNECTOR_NAME = XChangeConnector.class.getSimpleName();
+  public static final String TASK_ID = "task.id";
   private XChangeConfig config;
 
   @Override
@@ -52,18 +56,51 @@ public class XChangeConnector extends SourceConnector {
   public List<Map<String, String>> taskConfigs(int maxTasks) {
     final List<Map<String, String>> configs = new ArrayList<>();
 
-    // TODO implement multi tasking to share the workload
-    // for (int i = 0; i < maxTasks; i++) {
     final Map<String, String> taskConfig = this.config.values().entrySet().stream()
-        .filter(s -> s.getValue() != null)
+        .filter(s -> !MARKET_INSTRUMENTS_CONF.equals(s.getKey()) && s.getValue() != null)
         .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().toString()));
 
-    // System.out.println(">>> task configs");
-    // taskConfig.put(TASK_ID, Integer.toString(0));
-    configs.add(taskConfig);
-    // }
+    final var symbols = config.getList(MARKET_INSTRUMENTS_CONF);
+    final var evenTasks = distributeItems(symbols, maxTasks);
+
+    for (int i = 0; i < evenTasks.size(); i++) {
+      taskConfig.put(MARKET_INSTRUMENTS_CONF, String.join(",", evenTasks.get(i)));
+      taskConfig.put(TASK_ID, Integer.toString(i));
+      configs.add(new HashMap<>(taskConfig));
+    }
+
+    System.out.println(">>> " + configs);
 
     return configs;
+  }
+
+  private static List<List<String>> distributeItems(List<String> items, int numTasks) {
+    final List<List<String>> tasks = new ArrayList<>();
+
+    // Initialize each task with an empty list
+    for (int i = 0; i < numTasks; i++) {
+      tasks.add(new ArrayList<>());
+    }
+
+    int itemsPerTask = items.size() / numTasks; // Base number of items per task
+    int remainder = items.size() % numTasks;    // Remaining items to distribute
+
+    int itemIndex = 0;
+
+    // Distribute the items among tasks
+    for (int i = 0; i < numTasks; i++) {
+      // Each task gets `itemsPerTask` items
+      for (int j = 0; j < itemsPerTask; j++) {
+        tasks.get(i).add(items.get(itemIndex++));
+      }
+
+      // Distribute the remainder (one extra item for the first `remainder` tasks)
+      if (i < remainder) {
+        tasks.get(i).add(items.get(itemIndex++));
+      }
+    }
+
+    return tasks;
   }
 
   @Override

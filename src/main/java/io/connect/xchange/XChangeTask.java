@@ -4,48 +4,51 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.ConnectException;
+import org.apache.kafka.connect.header.ConnectHeaders;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
 import org.knowm.xchange.Exchange;
 import org.knowm.xchange.ExchangeFactory;
-import org.knowm.xchange.binance.BinanceExchange;
-import org.knowm.xchange.bybit.BybitExchange;
 import org.knowm.xchange.currency.CurrencyPair;
 import org.knowm.xchange.dto.marketdata.Ticker;
 import org.knowm.xchange.instrument.Instrument;
+import org.knowm.xchange.utils.DateUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.math.BigDecimal;
-import java.math.MathContext;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 public class XChangeTask extends SourceTask {
 
   private static final Logger log = LoggerFactory.getLogger(XChangeTask.class);
-  private static final String BINANCE_EXCHANGE = "binance";
-  private static final String BYBIT_EXCHANGE = "bybit";
   private static final Map<String, Object> SOURCE_PARTITION = Collections.emptyMap();
   private static final Map<String, Long> SOURCE_OFFSET = null; // Collections.singletonMap("offset", 0L);
 
-  private static final Schema TICKER_SCHEMA = SchemaBuilder.struct().version(1)
-      .field("symbol", Schema.STRING_SCHEMA)
-      .field("market", Schema.STRING_SCHEMA)
+  public static final Schema TICKER_KEY_SCHEMA = Schema.STRING_SCHEMA;
+  private static final Schema TICKER_VALUE_SCHEMA = SchemaBuilder.struct().version(1)
+      .field("instrument", Schema.STRING_SCHEMA)
+      .field("open", Schema.OPTIONAL_FLOAT64_SCHEMA)
       .field("last", Schema.FLOAT64_SCHEMA)
-      // .field("open", Schema.FLOAT64_SCHEMA)
-      // .field("high", Schema.FLOAT64_SCHEMA)
-      // .field("low", Schema.FLOAT64_SCHEMA)
-      // .field("volume", Schema.FLOAT64_SCHEMA)
-      // .field("percentageChange", Schema.OPTIONAL_INT64_SCHEMA)
+      .field("bid", Schema.FLOAT64_SCHEMA)
+      .field("ask", Schema.FLOAT64_SCHEMA)
+      .field("high", Schema.FLOAT64_SCHEMA)
+      .field("low", Schema.FLOAT64_SCHEMA)
+      .field("volume", Schema.FLOAT64_SCHEMA)
+      .field("quoteVolume", Schema.FLOAT64_SCHEMA)
       .field("timestamp", Schema.INT64_SCHEMA)
+      .field("bidSize", Schema.FLOAT64_SCHEMA)
+      .field("askSize", Schema.FLOAT64_SCHEMA)
+      .field("percentageChange", Schema.FLOAT64_SCHEMA)
       .build();
+  public static final String EXCHANGE_HEADER = "exchange";
 
   private String kafkaTopic;
   private long pollIntervalMs;
-  private Set<String> dataSymbols;
-  private String dataMarket;
+  private List<String> dataSymbols;
   private Exchange exchange;
 
   @Override
@@ -54,10 +57,10 @@ public class XChangeTask extends SourceTask {
   }
 
   public XChangeTask() {
-    // TODO inject exchange for unit testing
+    // gets exchange from the config
   }
 
-  public XChangeTask(BinanceExchange exchange) {
+  public XChangeTask(Exchange exchange) {
     this.exchange = exchange;
   }
 
@@ -66,27 +69,19 @@ public class XChangeTask extends SourceTask {
     final var config = new XChangeConfig(props);
     this.kafkaTopic = config.getString(XChangeConfig.KAFKA_TOPIC_CONF);
     this.pollIntervalMs = config.getLong(XChangeConfig.POLL_INTERVAL_MS_CONF);
-    this.dataSymbols = Arrays.stream(splitSymbols(config))
-        .filter(s -> !s.isEmpty()).collect(Collectors.toUnmodifiableSet());
-    this.dataMarket = config.getString(XChangeConfig.DATA_MARKET_CONF);
+    this.dataSymbols = config.getList(XChangeConfig.MARKET_INSTRUMENTS_CONF);
 
-    if (BINANCE_EXCHANGE.equalsIgnoreCase(this.dataMarket)) {
-      this.exchange = ExchangeFactory.INSTANCE.createExchange(BinanceExchange.class);
+    // create and init the exchange
+    if (exchange == null) {
+      final var markerClassName = config.getString(XChangeConfig.MARKET_CLASS_NAME_CONF);
+      this.exchange = ExchangeFactory.INSTANCE.createExchange(markerClassName);
+
+      try {
+        exchange.remoteInit();
+      } catch (IOException e) {
+        throw new ConnectException(e);
+      }
     }
-
-    if (BYBIT_EXCHANGE.equalsIgnoreCase(this.dataMarket)) {
-      this.exchange = ExchangeFactory.INSTANCE.createExchange(BybitExchange.class);
-    }
-
-    try {
-      exchange.remoteInit();
-    } catch (IOException e) {
-      throw new ConnectException(e);
-    }
-  }
-
-  private static String[] splitSymbols(XChangeConfig config) {
-    return config.getString(XChangeConfig.DATA_SYMBOLS_CONF).split(",");
   }
 
   @Override
@@ -107,18 +102,11 @@ public class XChangeTask extends SourceTask {
     for (String symbol : dataSymbols) {
       final var ticker = marketTicker(symbol);
       records.add(buildSourceRecord(ticker));
-      records.add(buildSourceRecord(inverseTicker(ticker)));
     }
 
     log.debug("Producing {}", records);
 
     return records;
-  }
-
-  private static Ticker inverseTicker(Ticker ticker) {
-    final Instrument instrument = new CurrencyPair(ticker.getInstrument().getCounter(), ticker.getInstrument().getBase());
-    final var inverted = BigDecimal.ONE.divide(ticker.getLast(), MathContext.DECIMAL64);
-    return new Ticker.Builder().instrument(instrument).last(inverted).timestamp(ticker.getTimestamp()).build();
   }
 
   private SourceRecord buildSourceRecord(Ticker ticker) {
@@ -127,31 +115,58 @@ public class XChangeTask extends SourceTask {
         SOURCE_OFFSET,
         kafkaTopic,
         null,
-        Schema.STRING_SCHEMA,
-        currencyPairName(ticker.getInstrument()),
-        TICKER_SCHEMA,
-        tickerStruct(ticker),
+        TICKER_KEY_SCHEMA,
+        tickerKey(ticker),
+        TICKER_VALUE_SCHEMA,
+        tickerValue(ticker),
         null,
-        null
-    );
+        recordHeaders());
   }
 
-  private Struct tickerStruct(Ticker ticker) {
-    final var pair = currencyPairName(ticker.getInstrument());
-    return new Struct(TICKER_SCHEMA)
-        .put("symbol", pair)
-        .put("market", this.dataMarket)
+  private ConnectHeaders recordHeaders() {
+    final var headers = new ConnectHeaders();
+    headers.addString(EXCHANGE_HEADER, exchangeName().toLowerCase());
+    return headers;
+  }
+
+  private String exchangeName() {
+    return exchange.getExchangeSpecification().getExchangeName();
+  }
+
+  private static String tickerKey(Ticker ticker) {
+    return ticker.getInstrument().toString();
+  }
+
+  private Struct tickerValue(Ticker ticker) {
+    /*
+     * @param instrument       Traded instrument
+     * @param open             Open price
+     * @param last             Last price
+     * @param bid              Bid price
+     * @param ask              Ask price
+     * @param high             High price
+     * @param low              Low price
+     * @param volume           24h volume in base currency
+     * @param quoteVolume      24h volume in counter currency
+     * @param timestamp        The timestamp of the ticker
+     * @param bidSize          The instantaneous size at the bid price
+     * @param askSize          The instantaneous size at the ask price
+     * @param percentageChange Price percentage change
+     */
+    return new Struct(TICKER_VALUE_SCHEMA)
+        .put("instrument", ticker.getInstrument().toString())
+        .put("open", ticker.getOpen().doubleValue())
         .put("last", ticker.getLast().doubleValue())
-        // .put("open", ticker.getOpen())
-        // .put("high", ticker.getHigh())
-        // .put("low", ticker.getLow())
-        // .put("volume", ticker.getVolume())
-        // .put("percentageChange", ticker.getPercentageChange());
-        .put("timestamp", ticker.getTimestamp().getTime());
-  }
-
-  private static String currencyPairName(Instrument instrument) {
-    return instrument.getBase().getSymbol() + "-" + instrument.getCounter();
+        .put("bid", ticker.getBid().doubleValue())
+        .put("ask", ticker.getAsk().doubleValue())
+        .put("high", ticker.getHigh().doubleValue())
+        .put("low", ticker.getLow().doubleValue())
+        .put("volume", ticker.getVolume().doubleValue())
+        .put("quoteVolume", ticker.getVolume().doubleValue())
+        .put("timestamp", DateUtils.toMillisNullSafe(ticker.getTimestamp()))
+        .put("bidSize", ticker.getBidSize().doubleValue())
+        .put("askSize", ticker.getAskSize().doubleValue())
+        .put("percentageChange", ticker.getPercentageChange().doubleValue());
   }
 
   private Ticker marketTicker(String symbol) {
