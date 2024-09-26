@@ -30,19 +30,20 @@ public class XChangeTask extends SourceTask {
 
   public static final Schema TICKER_KEY_SCHEMA = Schema.STRING_SCHEMA;
   private static final Schema TICKER_VALUE_SCHEMA = SchemaBuilder.struct().version(1)
-      .field("instrument", Schema.STRING_SCHEMA)
-      .field("open", Schema.OPTIONAL_FLOAT64_SCHEMA)
-      .field("last", Schema.FLOAT64_SCHEMA)
-      .field("bid", Schema.FLOAT64_SCHEMA)
-      .field("ask", Schema.FLOAT64_SCHEMA)
-      .field("high", Schema.FLOAT64_SCHEMA)
-      .field("low", Schema.FLOAT64_SCHEMA)
-      .field("volume", Schema.FLOAT64_SCHEMA)
-      .field("quoteVolume", Schema.FLOAT64_SCHEMA)
-      .field("timestamp", Schema.INT64_SCHEMA)
-      .field("bidSize", Schema.FLOAT64_SCHEMA)
-      .field("askSize", Schema.FLOAT64_SCHEMA)
-      .field("percentageChange", Schema.FLOAT64_SCHEMA)
+      .field("instrument", Schema.STRING_SCHEMA) // The tradable identifier (e.g. ETH/BTC)
+      .field("open", Schema.OPTIONAL_FLOAT64_SCHEMA) // Open price
+      .field("last", Schema.FLOAT64_SCHEMA) // Last price
+      .field("bid", Schema.FLOAT64_SCHEMA) // Bid price
+      .field("ask", Schema.FLOAT64_SCHEMA) // Ask price
+      .field("high", Schema.FLOAT64_SCHEMA) // High price
+      .field("low", Schema.FLOAT64_SCHEMA) // Low price
+      .field("volume", Schema.FLOAT64_SCHEMA) // 24h volume in base currency
+      .field("quoteVolume", Schema.FLOAT64_SCHEMA) // 24h volume in counter currency
+      .field("timestamp", Schema.INT64_SCHEMA) // The timestamp of the ticker
+      .field("bidSize", Schema.FLOAT64_SCHEMA) //  The instantaneous size at the bid price
+      .field("askSize", Schema.FLOAT64_SCHEMA) // The instantaneous size at the ask price
+      .field("percentageChange", Schema.FLOAT64_SCHEMA) // Price percentage change
+      .field("exchange", Schema.STRING_SCHEMA) // Exchange name
       .build();
   public static final String EXCHANGE_HEADER = "exchange";
 
@@ -50,6 +51,7 @@ public class XChangeTask extends SourceTask {
   private long pollIntervalMs;
   private List<String> dataSymbols;
   private Exchange exchange;
+  private String exchangeName;
 
   @Override
   public String version() {
@@ -70,6 +72,7 @@ public class XChangeTask extends SourceTask {
     this.kafkaTopic = config.getString(XChangeConfig.KAFKA_TOPIC_CONF);
     this.pollIntervalMs = config.getLong(XChangeConfig.POLL_INTERVAL_MS_CONF);
     this.dataSymbols = config.getList(XChangeConfig.MARKET_INSTRUMENTS_CONF);
+    this.exchangeName = config.getString(XChangeConfig.MARKET_KNOWN_NAME_CONF);
 
     // create and init the exchange
     if (exchange == null) {
@@ -125,12 +128,8 @@ public class XChangeTask extends SourceTask {
 
   private ConnectHeaders recordHeaders() {
     final var headers = new ConnectHeaders();
-    headers.addString(EXCHANGE_HEADER, exchangeName().toLowerCase());
+    headers.addString(EXCHANGE_HEADER, exchangeName);
     return headers;
-  }
-
-  private String exchangeName() {
-    return exchange.getExchangeSpecification().getExchangeName();
   }
 
   private static String tickerKey(Ticker ticker) {
@@ -138,21 +137,6 @@ public class XChangeTask extends SourceTask {
   }
 
   private Struct tickerValue(Ticker ticker) {
-    /*
-     * @param instrument       Traded instrument
-     * @param open             Open price
-     * @param last             Last price
-     * @param bid              Bid price
-     * @param ask              Ask price
-     * @param high             High price
-     * @param low              Low price
-     * @param volume           24h volume in base currency
-     * @param quoteVolume      24h volume in counter currency
-     * @param timestamp        The timestamp of the ticker
-     * @param bidSize          The instantaneous size at the bid price
-     * @param askSize          The instantaneous size at the ask price
-     * @param percentageChange Price percentage change
-     */
     return new Struct(TICKER_VALUE_SCHEMA)
         .put("instrument", ticker.getInstrument().toString())
         .put("open", ticker.getOpen().doubleValue())
@@ -166,7 +150,8 @@ public class XChangeTask extends SourceTask {
         .put("timestamp", DateUtils.toMillisNullSafe(ticker.getTimestamp()))
         .put("bidSize", ticker.getBidSize().doubleValue())
         .put("askSize", ticker.getAskSize().doubleValue())
-        .put("percentageChange", ticker.getPercentageChange().doubleValue());
+        .put("percentageChange", ticker.getPercentageChange().doubleValue())
+        .put("exchange", exchangeName);
   }
 
   private Ticker marketTicker(String symbol) {
