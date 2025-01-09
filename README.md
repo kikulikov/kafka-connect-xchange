@@ -1,5 +1,14 @@
 # XCHANGE
 
+## TODO
+
+1. image
+2. order number / priority
+3. network
+4. 
+
+
+
 ## Running in development
 
 ### Run unit and integration tests. Build the project.

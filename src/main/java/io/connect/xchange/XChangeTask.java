@@ -4,7 +4,6 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.ConnectException;
-import org.apache.kafka.connect.header.ConnectHeaders;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
 import org.knowm.xchange.Exchange;
@@ -31,21 +30,21 @@ public class XChangeTask extends SourceTask {
   public static final Schema TICKER_KEY_SCHEMA = Schema.STRING_SCHEMA;
   private static final Schema TICKER_VALUE_SCHEMA = SchemaBuilder.struct().version(1)
       .field("instrument", Schema.STRING_SCHEMA) // The tradable identifier (e.g. ETH/BTC)
-      .field("open", Schema.OPTIONAL_FLOAT64_SCHEMA) // Open price
-      .field("last", Schema.FLOAT64_SCHEMA) // Last price
-      .field("bid", Schema.FLOAT64_SCHEMA) // Bid price
-      .field("ask", Schema.FLOAT64_SCHEMA) // Ask price
-      .field("high", Schema.FLOAT64_SCHEMA) // High price
-      .field("low", Schema.FLOAT64_SCHEMA) // Low price
+      .field("baseSymbol", Schema.STRING_SCHEMA) // The tradable identifier (e.g. ETH/BTC)
+      .field("counterSymbol", Schema.STRING_SCHEMA) // The tradable identifier (e.g. ETH/BTC)
+      .field("openPrice", Schema.FLOAT64_SCHEMA) // Open price
+      .field("lastPrice", Schema.FLOAT64_SCHEMA) // Last price
+      .field("bidPrice", Schema.FLOAT64_SCHEMA) // Bid price
+      .field("askPrice", Schema.FLOAT64_SCHEMA) // Ask price
+      .field("highPrice", Schema.FLOAT64_SCHEMA) // High price
+      .field("lowPrice", Schema.FLOAT64_SCHEMA) // Low price
       .field("volume", Schema.FLOAT64_SCHEMA) // 24h volume in base currency
       .field("quoteVolume", Schema.FLOAT64_SCHEMA) // 24h volume in counter currency
       .field("timestamp", Schema.INT64_SCHEMA) // The timestamp of the ticker
       .field("bidSize", Schema.FLOAT64_SCHEMA) //  The instantaneous size at the bid price
       .field("askSize", Schema.FLOAT64_SCHEMA) // The instantaneous size at the ask price
       .field("percentageChange", Schema.FLOAT64_SCHEMA) // Price percentage change
-      .field("exchange", Schema.STRING_SCHEMA) // Exchange name
       .build();
-  public static final String EXCHANGE_HEADER = "exchange";
 
   private String kafkaTopic;
   private long pollIntervalMs;
@@ -72,18 +71,16 @@ public class XChangeTask extends SourceTask {
     this.kafkaTopic = config.getString(XChangeConfig.KAFKA_TOPIC_CONF);
     this.pollIntervalMs = config.getLong(XChangeConfig.POLL_INTERVAL_MS_CONF);
     this.dataSymbols = config.getList(XChangeConfig.MARKET_INSTRUMENTS_CONF);
-    this.exchangeName = config.getString(XChangeConfig.MARKET_KNOWN_NAME_CONF);
 
-    // create and init the exchange
-    if (exchange == null) {
-      final var markerClassName = config.getString(XChangeConfig.MARKET_CLASS_NAME_CONF);
-      this.exchange = ExchangeFactory.INSTANCE.createExchange(markerClassName);
+    // create the exchange
+    final var marketClassName = config.getString(XChangeConfig.MARKET_CLASS_NAME_CONF);
+    this.exchange = ExchangeFactory.INSTANCE.createExchange(marketClassName);
 
-      try {
-        exchange.remoteInit();
-      } catch (IOException e) {
-        throw new ConnectException(e);
-      }
+    // init the exchange
+    try {
+      exchange.remoteInit();
+    } catch (IOException e) {
+      throw new ConnectException(e);
     }
   }
 
@@ -122,14 +119,7 @@ public class XChangeTask extends SourceTask {
         tickerKey(ticker),
         TICKER_VALUE_SCHEMA,
         tickerValue(ticker),
-        null,
-        recordHeaders());
-  }
-
-  private ConnectHeaders recordHeaders() {
-    final var headers = new ConnectHeaders();
-    headers.addString(EXCHANGE_HEADER, exchangeName);
-    return headers;
+        null);
   }
 
   private static String tickerKey(Ticker ticker) {
@@ -139,19 +129,20 @@ public class XChangeTask extends SourceTask {
   private Struct tickerValue(Ticker ticker) {
     return new Struct(TICKER_VALUE_SCHEMA)
         .put("instrument", ticker.getInstrument().toString())
-        .put("open", ticker.getOpen().doubleValue())
-        .put("last", ticker.getLast().doubleValue())
-        .put("bid", ticker.getBid().doubleValue())
-        .put("ask", ticker.getAsk().doubleValue())
-        .put("high", ticker.getHigh().doubleValue())
-        .put("low", ticker.getLow().doubleValue())
+        .put("baseSymbol", ticker.getInstrument().getBase().getSymbol())
+        .put("counterSymbol", ticker.getInstrument().getCounter().getSymbol())
+        .put("openPrice", ticker.getOpen().doubleValue())
+        .put("lastPrice", ticker.getLast().doubleValue())
+        .put("bidPrice", ticker.getBid().doubleValue())
+        .put("askPrice", ticker.getAsk().doubleValue())
+        .put("highPrice", ticker.getHigh().doubleValue())
+        .put("lowPrice", ticker.getLow().doubleValue())
         .put("volume", ticker.getVolume().doubleValue())
-        .put("quoteVolume", ticker.getVolume().doubleValue())
+        .put("quoteVolume", ticker.getQuoteVolume().doubleValue())
         .put("timestamp", DateUtils.toMillisNullSafe(ticker.getTimestamp()))
         .put("bidSize", ticker.getBidSize().doubleValue())
         .put("askSize", ticker.getAskSize().doubleValue())
-        .put("percentageChange", ticker.getPercentageChange().doubleValue())
-        .put("exchange", exchangeName);
+        .put("percentageChange", ticker.getPercentageChange().doubleValue());
   }
 
   private Ticker marketTicker(String symbol) {
