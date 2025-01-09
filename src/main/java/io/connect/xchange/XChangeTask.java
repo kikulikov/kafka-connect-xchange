@@ -50,7 +50,6 @@ public class XChangeTask extends SourceTask {
   private long pollIntervalMs;
   private List<String> dataSymbols;
   private Exchange exchange;
-  private String exchangeName;
 
   @Override
   public String version() {
