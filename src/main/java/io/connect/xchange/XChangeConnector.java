@@ -49,8 +49,7 @@ public class XChangeConnector extends SourceConnector {
   }
 
   /**
-   * Defines the individual task configurations that will be executed. The connector doesn't support
-   * multitasking. One task only.
+   * Defines the individual task configurations that will be executed.
    */
   @Override
   public List<Map<String, String>> taskConfigs(int maxTasks) {

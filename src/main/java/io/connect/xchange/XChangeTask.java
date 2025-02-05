@@ -99,7 +99,7 @@ public class XChangeTask extends SourceTask {
     final List<SourceRecord> records = new ArrayList<>();
 
     for (String symbol : dataSymbols) {
-      final var ticker = marketTicker(symbol);
+      final var ticker = getMarketTicker(symbol);
       records.add(buildSourceRecord(ticker));
     }
 
@@ -144,9 +144,10 @@ public class XChangeTask extends SourceTask {
         .put("percentageChange", ticker.getPercentageChange().doubleValue());
   }
 
-  private Ticker marketTicker(String symbol) {
+  private Ticker getMarketTicker(String symbol) {
     try {
       final Instrument instrument = new CurrencyPair(symbol);
+      log.info("Getting a ticker for {}", symbol);
       return exchange.getMarketDataService().getTicker(instrument);
     } catch (IOException e) {
       throw new ConnectException(e);

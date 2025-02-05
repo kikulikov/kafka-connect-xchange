@@ -8,6 +8,14 @@
 mvn clean test failsafe:integration-test package
 ```
 
+### Docker Clean Up
+
+```bash
+docker system df
+docker system prune -a
+docker volume prune
+```
+
 ### Run standalone connect and submit the connector
 
 ```bash
@@ -20,7 +28,7 @@ kafka-topics --bootstrap-server=localhost:9092 --create --topic=prices --replica
 kafka-topics --bootstrap-server=localhost:9092 --describe --topic=prices
 
 # Run the connector
-${CONFLUENT_HOME}/bin/connect-standalone config/standalone-worker.properties config/standalone-connector-binance.properties
+${CONFLUENT_HOME}/bin/connect-standalone config/standalone-worker.properties config/standalone-connector-bybit.properties
 
 # Check the topic
 kafka-console-consumer --bootstrap-server localhost:9092 --topic prices --from-beginning
