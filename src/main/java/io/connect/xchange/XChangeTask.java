@@ -147,7 +147,7 @@ public class XChangeTask extends SourceTask {
   private Ticker getMarketTicker(String symbol) {
     try {
       final Instrument instrument = new CurrencyPair(symbol);
-      log.info("Getting a ticker for {}", symbol);
+      log.info("Getting a ticker representing the current exchange rate for {}", symbol);
       return exchange.getMarketDataService().getTicker(instrument);
     } catch (IOException e) {
       throw new ConnectException(e);
